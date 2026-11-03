@@ -56,7 +56,7 @@ export const activityService = {
 };
 
 export const taskService = {
-  listOpen: (c: TenantContext) => db.task.findMany({ where: { tenantId: tenantCrm.tenant(c), status: { in: ["TODO", "IN_PROGRESS"] } }, include: { company: true, contact: true, deal: true }, orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }] }),
+  listOpen: (c: TenantContext) => db.task.findMany({ where: { tenantId: tenantCrm.tenant(c), status: { in: ["TODO", "IN_PROGRESS"] }, dueAt: { not: null } }, include: { company: true, contact: true, deal: true }, orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }] }),
   create: async (c: TenantContext, input: CreateTaskInput) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); await tenantCrm.deal(c, input.dealId); return db.task.create({ data: { tenantId: tenantCrm.tenant(c), title: input.title, description: input.notes, dueAt: input.dueAt, companyId: input.companyId, contactId: input.contactId, dealId: input.dealId } }); },
   complete: async (c: TenantContext, id: string) => db.task.updateMany({ where: { id, tenantId: tenantCrm.tenant(c) }, data: { status: "DONE" } }),
 };
