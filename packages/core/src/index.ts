@@ -1,4 +1,5 @@
-import { db } from "@aeoncrm/db";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { activity, company, contact, db, deal, lead, lineItem, product, task, ticket } from "@aeoncrm/db";
 import { tenantCrm } from "./crm-tenant";
 import type { TenantContext } from "./agent-memory";
 
@@ -7,69 +8,78 @@ export type CreateActivityInput = { type: "CALL" | "EMAIL" | "MEETING" | "TASK" 
 export type CreateTaskInput = { title: string; notes?: string; dueAt?: Date; companyId?: string; contactId?: string; dealId?: string };
 
 export const companyService = {
-  list: (c: TenantContext) => db.company.findMany({ where: { tenantId: tenantCrm.tenant(c) }, include: { contacts: true, deals: true }, orderBy: { updatedAt: "desc" } }),
-  get: (c: TenantContext, id: string) => db.company.findFirst({ where: { id, tenantId: tenantCrm.tenant(c) }, include: { contacts: true, deals: true, activities: true, tasks: true } }),
-  create: (c: TenantContext, input: { name: string; website?: string; industry?: string; description?: string }) => db.company.create({ data: { ...input, tenantId: tenantCrm.tenant(c) } }),
+  list: async (c: TenantContext) => { const tenantId = tenantCrm.tenant(c); return db.select().from(company).where(eq(company.tenantId, tenantId)).orderBy(desc(company.updatedAt)); },
+  get: async (c: TenantContext, id: string) => {
+    const tenantId = tenantCrm.tenant(c); const row = (await db.select().from(company).where(and(eq(company.id, id), eq(company.tenantId, tenantId))).limit(1))[0]; if (!row) return undefined;
+    const [contacts, deals, activities, tasks] = await Promise.all([db.select().from(contact).where(and(eq(contact.tenantId, tenantId), eq(contact.companyId, id))), db.select().from(deal).where(and(eq(deal.tenantId, tenantId), eq(deal.companyId, id))), db.select().from(activity).where(and(eq(activity.tenantId, tenantId), eq(activity.companyId, id))).orderBy(desc(activity.occurredAt)), db.select().from(task).where(and(eq(task.tenantId, tenantId), eq(task.companyId, id))).orderBy(desc(task.createdAt))]);
+    return { ...row, contacts, deals, activities, tasks };
+  },
+  create: async (c: TenantContext, input: { name: string; website?: string; industry?: string; description?: string }) => { const rows = await db.insert(company).values({ id: crypto.randomUUID(), ...input, tenantId: tenantCrm.tenant(c) }).returning(); return rows[0]; },
 };
 
 export const contactService = {
-  list: (c: TenantContext) => db.contact.findMany({ where: { tenantId: tenantCrm.tenant(c) }, include: { company: true }, orderBy: { updatedAt: "desc" } }),
-  get: (c: TenantContext, id: string) => db.contact.findFirst({ where: { id, tenantId: tenantCrm.tenant(c) }, include: { company: true, deals: true, activities: true, tasks: true } }),
-  create: async (c: TenantContext, input: { firstName: string; lastName: string; email?: string; phone?: string; title?: string; companyId?: string }) => { await tenantCrm.company(c, input.companyId); return db.contact.create({ data: { ...input, tenantId: tenantCrm.tenant(c) } }); },
+  list: async (c: TenantContext) => { const tenantId = tenantCrm.tenant(c); return db.select().from(contact).where(eq(contact.tenantId, tenantId)).orderBy(desc(contact.updatedAt)); },
+  get: async (c: TenantContext, id: string) => { const tenantId = tenantCrm.tenant(c); const row = (await db.select().from(contact).where(and(eq(contact.id, id), eq(contact.tenantId, tenantId))).limit(1))[0]; if (!row) return undefined; const companyRow = row.companyId ? (await db.select().from(company).where(eq(company.id, row.companyId)).limit(1))[0] : undefined; return { ...row, company: companyRow }; },
+  create: async (c: TenantContext, input: { firstName: string; lastName: string; email?: string; phone?: string; title?: string; companyId?: string }) => { await tenantCrm.company(c, input.companyId); const rows = await db.insert(contact).values({ id: crypto.randomUUID(), ...input, tenantId: tenantCrm.tenant(c) }).returning(); return rows[0]; },
 };
 
 export const leadService = {
-  list: (c: TenantContext) => db.lead.findMany({ where: { tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true }, orderBy: [{ score: "desc" }, { updatedAt: "desc" }] }),
-  get: (c: TenantContext, id: string) => db.lead.findFirst({ where: { id, tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true } }),
-  create: async (c: TenantContext, input: { firstName?: string; lastName?: string; companyName?: string; email?: string; phone?: string; title?: string; source?: string; score?: number; notes?: string; companyId?: string; contactId?: string }) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); return db.lead.create({ data: { ...input, tenantId: tenantCrm.tenant(c) } }); },
-  updateStatus: async (c: TenantContext, id: string, status: "NEW" | "CONTACTED" | "QUALIFIED" | "CONVERTED" | "LOST") => db.lead.updateMany({ where: { id, tenantId: tenantCrm.tenant(c) }, data: { status } }),
+  list: async (c: TenantContext) => { const tenantId = tenantCrm.tenant(c); return db.select().from(lead).where(eq(lead.tenantId, tenantId)).orderBy(desc(lead.score), desc(lead.updatedAt)); },
+  get: async (c: TenantContext, id: string) => { const tenantId = tenantCrm.tenant(c); return (await db.select().from(lead).where(and(eq(lead.id, id), eq(lead.tenantId, tenantId))).limit(1))[0]; },
+  create: async (c: TenantContext, input: { firstName?: string; lastName?: string; companyName?: string; email?: string; phone?: string; title?: string; source?: string; score?: number; notes?: string; companyId?: string; contactId?: string }) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); const rows = await db.insert(lead).values({ id: crypto.randomUUID(), ...input, tenantId: tenantCrm.tenant(c) }).returning(); return rows[0]; },
+  updateStatus: async (c: TenantContext, id: string, status: "NEW" | "CONTACTED" | "QUALIFIED" | "CONVERTED" | "LOST") => db.update(lead).set({ status, updatedAt: new Date() }).where(and(eq(lead.id, id), eq(lead.tenantId, tenantCrm.tenant(c)))).returning({ id: lead.id }),
 };
 
 export const dealService = {
-  list: (c: TenantContext) => db.deal.findMany({ where: { tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true, lineItems: { include: { product: true } } }, orderBy: { updatedAt: "desc" } }),
-  get: (c: TenantContext, id: string) => db.deal.findFirst({ where: { id, tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true, activities: true, tasks: true, lineItems: { include: { product: true } } } }),
-  create: async (c: TenantContext, input: { name: string; value?: number; currency?: string; stage?: DealStage; probability?: number; companyId?: string; contactId?: string }) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); return db.deal.create({ data: { ...input, tenantId: tenantCrm.tenant(c), value: input.value ?? 0 } }); },
-  updateStage: async (c: TenantContext, id: string, stage: DealStage) => db.deal.updateMany({ where: { id, tenantId: tenantCrm.tenant(c) }, data: { stage } }),
+  list: async (c: TenantContext) => { const tenantId = tenantCrm.tenant(c); return db.select().from(deal).where(eq(deal.tenantId, tenantId)).orderBy(desc(deal.updatedAt)); },
+  get: async (c: TenantContext, id: string) => { const tenantId = tenantCrm.tenant(c); return (await db.select().from(deal).where(and(eq(deal.id, id), eq(deal.tenantId, tenantId))).limit(1))[0]; },
+  create: async (c: TenantContext, input: { name: string; value?: number; currency?: string; stage?: DealStage; probability?: number; companyId?: string; contactId?: string }) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); const rows = await db.insert(deal).values({ id: crypto.randomUUID(), tenantId: tenantCrm.tenant(c), name: input.name, value: String(input.value ?? 0), currency: input.currency ?? "INR", stage: input.stage ?? "QUALIFICATION", probability: input.probability ?? 20, companyId: input.companyId, contactId: input.contactId }).returning(); return rows[0]; },
+  updateStage: async (c: TenantContext, id: string, stage: DealStage) => db.update(deal).set({ stage, updatedAt: new Date() }).where(and(eq(deal.id, id), eq(deal.tenantId, tenantCrm.tenant(c)))).returning({ id: deal.id }),
 };
 
 export const ticketService = {
-  list: (c: TenantContext) => db.ticket.findMany({ where: { tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true }, orderBy: [{ priority: "desc" }, { updatedAt: "desc" }] }),
-  get: (c: TenantContext, id: string) => db.ticket.findFirst({ where: { id, tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true } }),
-  create: async (c: TenantContext, input: { subject: string; description?: string; priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT"; companyId?: string; contactId?: string }) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); return db.ticket.create({ data: { ...input, tenantId: tenantCrm.tenant(c) } }); },
-  updateStatus: async (c: TenantContext, id: string, status: "OPEN" | "PENDING" | "RESOLVED" | "CLOSED") => db.ticket.updateMany({ where: { id, tenantId: tenantCrm.tenant(c) }, data: { status, resolvedAt: status === "RESOLVED" || status === "CLOSED" ? new Date() : null } }),
+  list: async (c: TenantContext) => { const tenantId = tenantCrm.tenant(c); return db.select().from(ticket).where(eq(ticket.tenantId, tenantId)).orderBy(desc(ticket.updatedAt)); },
+  get: async (c: TenantContext, id: string) => { const tenantId = tenantCrm.tenant(c); return (await db.select().from(ticket).where(and(eq(ticket.id, id), eq(ticket.tenantId, tenantId))).limit(1))[0]; },
+  create: async (c: TenantContext, input: { subject: string; description?: string; priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT"; companyId?: string; contactId?: string }) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); const rows = await db.insert(ticket).values({ id: crypto.randomUUID(), tenantId: tenantCrm.tenant(c), ...input }).returning(); return rows[0]; },
+  updateStatus: async (c: TenantContext, id: string, status: "OPEN" | "PENDING" | "RESOLVED" | "CLOSED") => db.update(ticket).set({ status, resolvedAt: status === "RESOLVED" || status === "CLOSED" ? new Date() : null, updatedAt: new Date() }).where(and(eq(ticket.id, id), eq(ticket.tenantId, tenantCrm.tenant(c)))).returning({ id: ticket.id }),
 };
 
 export const productService = {
-  list: (c: TenantContext) => db.product.findMany({ where: { tenantId: tenantCrm.tenant(c) }, orderBy: [{ active: "desc" }, { name: "asc" }] }),
-  get: (c: TenantContext, id: string) => db.product.findFirst({ where: { id, tenantId: tenantCrm.tenant(c) }, include: { lineItems: true } }),
-  create: (c: TenantContext, input: { name: string; sku?: string; description?: string; unitPrice: number; currency?: string; active?: boolean }) => db.product.create({ data: { ...input, tenantId: tenantCrm.tenant(c) } }),
+  list: async (c: TenantContext) => db.select().from(product).where(eq(product.tenantId, tenantCrm.tenant(c))).orderBy(desc(product.active), asc(product.name)),
+  get: async (c: TenantContext, id: string) => (await db.select().from(product).where(and(eq(product.id, id), eq(product.tenantId, tenantCrm.tenant(c)))).limit(1))[0],
+  create: async (c: TenantContext, input: { name: string; sku?: string; description?: string; unitPrice: number; currency?: string; active?: boolean }) => { const rows = await db.insert(product).values({ id: crypto.randomUUID(), tenantId: tenantCrm.tenant(c), ...input, unitPrice: String(input.unitPrice) }).returning(); return rows[0]; },
 };
 
 export const lineItemService = {
-  listForDeal: async (c: TenantContext, dealId: string) => { await tenantCrm.deal(c, dealId); return db.lineItem.findMany({ where: { tenantId: tenantCrm.tenant(c), dealId }, include: { product: true }, orderBy: { createdAt: "asc" } }); },
-  create: async (c: TenantContext, input: { dealId: string; productId?: string; description?: string; quantity: number; unitPrice: number; discount?: number }) => { await tenantCrm.deal(c, input.dealId); await tenantCrm.product(c, input.productId); return db.lineItem.create({ data: { ...input, tenantId: tenantCrm.tenant(c) } }); },
+  listForDeal: async (c: TenantContext, dealId: string) => { await tenantCrm.deal(c, dealId); return db.select().from(lineItem).where(and(eq(lineItem.tenantId, tenantCrm.tenant(c)), eq(lineItem.dealId, dealId))).orderBy(asc(lineItem.createdAt)); },
+  create: async (c: TenantContext, input: { dealId: string; productId?: string; description?: string; quantity: number; unitPrice: number; discount?: number }) => { await tenantCrm.deal(c, input.dealId); await tenantCrm.product(c, input.productId); const rows = await db.insert(lineItem).values({ id: crypto.randomUUID(), tenantId: tenantCrm.tenant(c), ...input, quantity: String(input.quantity), unitPrice: String(input.unitPrice), discount: String(input.discount ?? 0) }).returning(); return rows[0]; },
 };
 
 export const activityService = {
-  listRecent: (c: TenantContext, limit = 50) => db.activity.findMany({ where: { tenantId: tenantCrm.tenant(c) }, take: Math.min(Math.max(limit, 1), 200), include: { company: true, contact: true, deal: true }, orderBy: { occurredAt: "desc" } }),
-  create: async (c: TenantContext, input: CreateActivityInput) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); await tenantCrm.deal(c, input.dealId); return db.activity.create({ data: { tenantId: tenantCrm.tenant(c), type: input.type, subject: input.subject, body: input.notes, occurredAt: input.occurredAt ?? new Date(), companyId: input.companyId, contactId: input.contactId, dealId: input.dealId } }); },
+  listRecent: async (c: TenantContext, limit = 50) => db.select().from(activity).where(eq(activity.tenantId, tenantCrm.tenant(c))).orderBy(desc(activity.occurredAt)).limit(Math.min(Math.max(limit, 1), 200)),
+  create: async (c: TenantContext, input: CreateActivityInput) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); await tenantCrm.deal(c, input.dealId); const rows = await db.insert(activity).values({ id: crypto.randomUUID(), tenantId: tenantCrm.tenant(c), type: input.type, subject: input.subject, body: input.notes, occurredAt: input.occurredAt ?? new Date(), companyId: input.companyId, contactId: input.contactId, dealId: input.dealId }).returning(); return rows[0]; },
 };
 
 export const taskService = {
-  listOpen: (c: TenantContext) => db.task.findMany({ where: { tenantId: tenantCrm.tenant(c), status: { in: ["TODO", "IN_PROGRESS"] }, dueAt: { not: null } }, include: { company: true, contact: true, deal: true }, orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }] }),
-  create: async (c: TenantContext, input: CreateTaskInput) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); await tenantCrm.deal(c, input.dealId); return db.task.create({ data: { tenantId: tenantCrm.tenant(c), title: input.title, description: input.notes, dueAt: input.dueAt, companyId: input.companyId, contactId: input.contactId, dealId: input.dealId } }); },
-  complete: async (c: TenantContext, id: string) => db.task.updateMany({ where: { id, tenantId: tenantCrm.tenant(c) }, data: { status: "DONE" } }),
+  listOpen: async (c: TenantContext) => db.select().from(task).where(and(eq(task.tenantId, tenantCrm.tenant(c)), inArray(task.status, ["TODO", "IN_PROGRESS"]))).orderBy(asc(task.dueAt), desc(task.createdAt)),
+  create: async (c: TenantContext, input: CreateTaskInput) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); await tenantCrm.deal(c, input.dealId); const rows = await db.insert(task).values({ id: crypto.randomUUID(), tenantId: tenantCrm.tenant(c), title: input.title, description: input.notes, dueAt: input.dueAt, companyId: input.companyId, contactId: input.contactId, dealId: input.dealId }).returning(); return rows[0]; },
+  complete: async (c: TenantContext, id: string) => db.update(task).set({ status: "DONE", updatedAt: new Date() }).where(and(eq(task.id, id), eq(task.tenantId, tenantCrm.tenant(c)))).returning({ id: task.id }),
 };
 
 export const dashboardService = {
   async summary(c: TenantContext) {
     const tenantId = tenantCrm.tenant(c);
     const [companies, contacts, leads, tickets, openDeals, wonDeals, openTasks, followUps] = await Promise.all([
-      db.company.count({ where: { tenantId } }), db.contact.count({ where: { tenantId } }), db.lead.count({ where: { tenantId, status: { in: ["NEW", "CONTACTED", "QUALIFIED"] } } }), db.ticket.count({ where: { tenantId, status: { in: ["OPEN", "PENDING"] } } }),
-      db.deal.aggregate({ where: { tenantId, status: "OPEN" }, _sum: { value: true }, _count: true }), db.deal.aggregate({ where: { tenantId, status: "WON" }, _sum: { value: true }, _count: true }),
-      db.task.count({ where: { tenantId, status: { in: ["TODO", "IN_PROGRESS"] } } }), db.task.count({ where: { tenantId, status: { in: ["TODO", "IN_PROGRESS"] }, dueAt: { not: null } } }),
+      db.select({ count: sql<number>`count(*)` }).from(company).where(eq(company.tenantId, tenantId)),
+      db.select({ count: sql<number>`count(*)` }).from(contact).where(eq(contact.tenantId, tenantId)),
+      db.select({ count: sql<number>`count(*)` }).from(lead).where(and(eq(lead.tenantId, tenantId), inArray(lead.status, ["NEW", "CONTACTED", "QUALIFIED"]))),
+      db.select({ count: sql<number>`count(*)` }).from(ticket).where(and(eq(ticket.tenantId, tenantId), inArray(ticket.status, ["OPEN", "PENDING"]))),
+      db.select({ count: sql<number>`count(*)`, sum: sql<string>`coalesce(sum(${deal.value}), 0)` }).from(deal).where(and(eq(deal.tenantId, tenantId), eq(deal.status, "OPEN"))),
+      db.select({ count: sql<number>`count(*)`, sum: sql<string>`coalesce(sum(${deal.value}), 0)` }).from(deal).where(and(eq(deal.tenantId, tenantId), eq(deal.status, "WON"))),
+      db.select({ count: sql<number>`count(*)` }).from(task).where(and(eq(task.tenantId, tenantId), inArray(task.status, ["TODO", "IN_PROGRESS"]))),
+      db.select({ count: sql<number>`count(*)` }).from(task).where(and(eq(task.tenantId, tenantId), inArray(task.status, ["TODO", "IN_PROGRESS"]), sql`${task.dueAt} is not null`)),
     ]);
-    return { companies, contacts, leads, tickets, openDeals: openDeals._count, openPipelineValue: Number(openDeals._sum.value ?? 0), wonDeals: wonDeals._count, wonRevenue: Number(wonDeals._sum.value ?? 0), openTasks, followUps };
+    return { companies: Number(companies[0]?.count ?? 0), contacts: Number(contacts[0]?.count ?? 0), leads: Number(leads[0]?.count ?? 0), tickets: Number(tickets[0]?.count ?? 0), openDeals: Number(openDeals[0]?.count ?? 0), openPipelineValue: Number(openDeals[0]?.sum ?? 0), wonDeals: Number(wonDeals[0]?.count ?? 0), wonRevenue: Number(wonDeals[0]?.sum ?? 0), openTasks: Number(openTasks[0]?.count ?? 0), followUps: Number(followUps[0]?.count ?? 0) };
   },
 };
 
