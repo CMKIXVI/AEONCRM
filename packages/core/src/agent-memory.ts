@@ -1,5 +1,5 @@
 import { db } from "@aeoncrm/db";
-import type { InputJsonValue } from "@aeoncrm/db";
+import type { Prisma } from "@aeoncrm/db";
 import type { AeonIdentity } from "./identity";
 import { canApprove } from "./identity";
 import { agentAuditService } from "./agent-audit";
@@ -24,7 +24,7 @@ export const agentMessageService = {
     const { tenantId, userId } = requireTenant(context);
     const conversation = await db.agentConversation.findFirst({ where: { id: input.conversationId, tenantId }, select: { id: true } });
     if (!conversation) throw new Error("conversation not found");
-    const message = await db.agentMessage.create({ data: { conversationId: input.conversationId, userId, role: input.role, content: input.content, intent: input.intent, tool: input.tool, requiresApproval: input.requiresApproval ?? false, approved: input.approved ?? false, metadata: input.metadata as InputJsonValue | undefined } });
+    const message = await db.agentMessage.create({ data: { conversationId: input.conversationId, userId, role: input.role, content: input.content, intent: input.intent, tool: input.tool, requiresApproval: input.requiresApproval ?? false, approved: input.approved ?? false, metadata: input.metadata as Prisma.InputJsonValue | undefined } });
     await agentConversationService.touch(context, input.conversationId);
     return message;
   },
