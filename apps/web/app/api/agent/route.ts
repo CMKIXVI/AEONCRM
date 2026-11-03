@@ -1,5 +1,6 @@
 import { runAgent } from "@aeoncrm/agent";
 import { handleApiError, json } from "../../../lib/api";
+import { getRequestIdentity } from "../../../lib/auth";
 
 export async function POST(request: Request) {
   try {
@@ -9,6 +10,7 @@ export async function POST(request: Request) {
       message: body.message.trim(),
       approved: Boolean(body.approved),
       conversationId: typeof body.conversationId === "string" ? body.conversationId : undefined,
+      identity: getRequestIdentity(request),
     }));
   } catch (error) {
     return handleApiError(error);
