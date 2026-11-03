@@ -59,7 +59,7 @@ async function assertApprovalLinks(tenantId: string, conversationId: string, mes
 }
 
 export const agentApprovalService = {
-  create: async (context: TenantContext, input: { conversationId: string; messageId: string; tool: string; arguments: Record<string, unknown> }) => {
+  create: async (context: TenantContext, input: { conversationId: string; messageId: string; correlationId: string; tool: string; arguments: Record<string, unknown> }) => {
     const { tenantId } = requireTenant(context);
     await assertApprovalLinks(tenantId, input.conversationId, input.messageId);
     return db.agentApproval.create({ data: { tenantId, ...input, arguments: input.arguments } });
