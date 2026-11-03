@@ -3,7 +3,7 @@ import { tenantCrm } from "./crm-tenant";
 import type { TenantContext } from "./agent-memory";
 
 export type DealStage = "LEAD" | "QUALIFIED" | "PROPOSAL" | "NEGOTIATION" | "WON" | "LOST";
-export type CreateActivityInput = { type: "CALL" | "EMAIL" | "MEETING" | "TASK" | "NOTE"; subject: string; notes?: string; dueAt?: Date; companyId?: string; contactId?: string; dealId?: string };
+export type CreateActivityInput = { type: "CALL" | "EMAIL" | "MEETING" | "TASK" | "NOTE"; subject: string; notes?: string; occurredAt?: Date; companyId?: string; contactId?: string; dealId?: string };
 export type CreateTaskInput = { title: string; notes?: string; dueAt?: Date; companyId?: string; contactId?: string; dealId?: string };
 
 export const companyService = {
@@ -27,7 +27,7 @@ export const dealService = {
 
 export const activityService = {
   listRecent: (c: TenantContext, limit = 50) => db.activity.findMany({ where: { tenantId: tenantCrm.tenant(c) }, take: Math.min(Math.max(limit, 1), 200), include: { company: true, contact: true, deal: true }, orderBy: { occurredAt: "desc" } }),
-  create: async (c: TenantContext, input: CreateActivityInput) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); await tenantCrm.deal(c, input.dealId); return db.activity.create({ data: { tenantId: tenantCrm.tenant(c), type: input.type, subject: input.subject, body: input.notes, occurredAt: input.dueAt ?? new Date(), companyId: input.companyId, contactId: input.contactId, dealId: input.dealId } }); },
+  create: async (c: TenantContext, input: CreateActivityInput) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); await tenantCrm.deal(c, input.dealId); return db.activity.create({ data: { tenantId: tenantCrm.tenant(c), type: input.type, subject: input.subject, body: input.notes, occurredAt: input.occurredAt ?? new Date(), companyId: input.companyId, contactId: input.contactId, dealId: input.dealId } }); },
 };
 
 export const taskService = {
