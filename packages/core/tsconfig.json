@@ -5,7 +5,11 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@aeoncrm/db": ["../db/src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts"]
 }
