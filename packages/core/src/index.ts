@@ -46,3 +46,5 @@ export const dashboardService = {
     return { companies, contacts, openDeals: openDeals._count, openPipelineValue: Number(openDeals._sum.value ?? 0), wonDeals: wonDeals._count, wonRevenue: Number(wonDeals._sum.value ?? 0), openTasks, followUps };
   },
 };
+
+export { agentConversationService, agentMessageService, agentApprovalService } from "./agent-memory";
