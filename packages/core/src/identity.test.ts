@@ -9,7 +9,10 @@ describe("AEON identity", () => {
 
   it("allows approval only to privileged roles", () => {
     expect(canApprove({ userId: "u", tenantId: "t", roles: ["MEMBER"] })).toBe(false);
+    expect(canApprove({ userId: "u", tenantId: "t", roles: ["AGENT"] })).toBe(false);
+    expect(canApprove({ userId: "u", tenantId: "t", roles: ["SYSTEM"] })).toBe(false);
     expect(canApprove({ userId: "u", tenantId: "t", roles: ["OWNER"] })).toBe(true);
     expect(canApprove({ userId: "u", tenantId: "t", roles: ["ADMIN"] })).toBe(true);
+    expect(canApprove({ userId: "u", tenantId: "t", roles: [" member "] })).toBe(false);
   });
 });
