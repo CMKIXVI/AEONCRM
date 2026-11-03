@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DealStatus { OPEN WON LOST }
+enum ActivityType { CALL EMAIL MEETING NOTE TASK }
+enum TaskStatus { TODO IN_PROGRESS DONE CANCELLED }
+
+a model Company {
+  id          String    @id @default(cuid())
+  name        String
+  website     String?
+  industry    String?
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  contacts    Contact[]
+  deals       Deal[]
+  activities  Activity[]
+  tasks       Task[]
+  @@index([name])
+}
+
+model Contact {
+  id          String    @id @default(cuid())
+  firstName   String
+  lastName    String
+  email       String?
+  phone       String?
+  title       String?
+  companyId   String?
+  company     Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deals       Deal[]
+  activities  Activity[]
+  tasks       Task[]
+  @@index([email])
+  @@index([companyId])
+}
+
+model Deal {
+  id          String      @id @default(cuid())
+  name        String
+  value       Decimal     @db.Decimal(18, 2)
+  currency    String      @default("INR")
+  stage       String      @default("QUALIFICATION")
+  status      DealStatus  @default(OPEN)
+  probability Int         @default(20)
+  expectedAt  DateTime?
+  companyId   String?
+  contactId   String?
+  company     Company?    @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact     Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  activities  Activity[]
+  tasks       Task[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  @@index([status, stage])
+  @@index([companyId])
+}
+
+model Activity {
+  id         String       @id @default(cuid())
+  type       ActivityType
+  subject    String
+  body       String?
+  occurredAt DateTime     @default(now())
+  companyId  String?
+  contactId  String?
+  dealId     String?
+  company    Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact    Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal       Deal?        @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  @@index([occurredAt])
+  @@index([dealId])
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  status      TaskStatus @default(TODO)
+  dueAt       DateTime?
+  companyId   String?
+  contactId   String?
+  dealId      String?
+  company     Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact     Contact?   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal        Deal?      @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  @@index([status, dueAt])
+}
