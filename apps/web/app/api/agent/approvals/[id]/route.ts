@@ -1,3 +1,4 @@
+import { executeApproval } from "@aeoncrm/agent";
 import { agentApprovalService } from "@aeoncrm/core";
 import { handleApiError, json } from "../../../../../../lib/api";
 
@@ -10,7 +11,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
     if (approval.status !== "PENDING") return json({ error: `approval is already ${approval.status.toLowerCase()}` }, { status: 409 });
     if (action === "reject") return json({ approval: await agentApprovalService.markRejected(params.id) });
     if (action !== "approve") return json({ error: "action must be approve or reject" }, { status: 400 });
-    return json({ approval: await agentApprovalService.markApproved(params.id) });
+
+    await agentApprovalService.markApproved(params.id);
+    return json(await executeApproval(params.id));
   } catch (error) {
     return handleApiError(error);
   }
