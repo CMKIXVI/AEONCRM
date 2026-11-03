@@ -1,0 +1,23 @@
+-- AEONCRM tenant isolation policy reference.
+--
+-- Application services already scope every query by tenantId. This file documents
+-- the PostgreSQL defense-in-depth layer to enable when deploying against a
+-- database where the application role is permitted to manage RLS.
+--
+-- The application must set the transaction-local tenant setting before querying:
+--   SET LOCAL app.tenant_id = '<tenant-id>';
+--
+-- Policies should be enabled after migration/bootstrap and validated in staging.
+
+-- Example policy pattern (apply per tenant-owned table):
+-- ALTER TABLE "Company" ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY company_tenant_isolation ON "Company"
+--   USING ("tenantId" = current_setting('app.tenant_id', true));
+-- CREATE POLICY company_tenant_insert ON "Company"
+--   WITH CHECK ("tenantId" = current_setting('app.tenant_id', true));
+--
+-- Repeat for Company, Contact, Lead, Deal, Ticket, Product, LineItem,
+-- Activity, Task, AgentConversation, AgentApproval and AgentAuditEventRecord.
+--
+-- Do not enable these statements blindly on an existing production database:
+-- bootstrap/migration roles and connection-pool behavior must be verified first.
