@@ -1,5 +1,5 @@
 import {
-  agentApprovalService, agentConversationService, agentMessageService, assertIdentity, canApprove, companyService, contactService,
+  agentApprovalService, agentConversationService, agentMessageService, assertIdentity, companyService, contactService,
   createDefaultToolRegistry, dashboardService, dealService, taskService, type AeonIdentity, type DealStage, type TenantContext,
 } from "@aeoncrm/core";
 import { clearPendingApproval, getConversation, remember, setPendingApproval } from "./memory";
@@ -27,13 +27,7 @@ const toolRegistry = createDefaultToolRegistry({
     const deals = await dealService.list(c);
     const query = String(args.dealQuery).trim().toLowerCase();
     const matches = deals.filter((d) => d.name.toLowerCase().includes(query));
-    if (matches.length !== 1) {
-      return {
-        needsClarification: true,
-        matches: matches.slice(0, 10),
-        message: matches.length ? "More than one deal matches." : "No matching deal found.",
-      };
-    }
+    if (matches.length !== 1) return { needsClarification: true, matches: matches.slice(0, 10), message: matches.length ? "More than one deal matches." : "No matching deal found." };
     return dealService.updateStage(c, matches[0].id, stage);
   },
 });
@@ -63,16 +57,9 @@ async function persistMessage(c: TenantContext, conversationId: string, input: O
 async function executeTool(identity: AeonIdentity, toolName: string, args: Record<string, unknown>) {
   const c = context(identity);
   const tool = toolRegistry.authorize(identity, toolName);
-  if (tool.access === "WRITE" && tool.requiresApproval && !canApprove(identity)) {
-    throw new Error(`approval authority required for write tool: ${toolName}`);
-  }
   const data = await tool.execute(c, args);
-  if (typeof data === "object" && data !== null && "needsClarification" in data && (data as { needsClarification?: boolean }).needsClarification) {
-    return { ok: false, status: "needs_clarification", ...(data as Record<string, unknown>) };
-  }
-  if (typeof data === "object" && data !== null && "rejected" in data && (data as { rejected?: boolean }).rejected) {
-    return { ok: false, status: "rejected", ...(data as Record<string, unknown>) };
-  }
+  if (typeof data === "object" && data !== null && "needsClarification" in data && (data as { needsClarification?: boolean }).needsClarification) return { ok: false, status: "needs_clarification", ...(data as Record<string, unknown>) };
+  if (typeof data === "object" && data !== null && "rejected" in data && (data as { rejected?: boolean }).rejected) return { ok: false, status: "rejected", ...(data as Record<string, unknown>) };
   return { ok: true, status: "completed", data };
 }
 
@@ -91,23 +78,31 @@ export async function runAgent(request: AgentRequest) {
   const governedTool = toolRegistry.get(p.tool);
   if (!governedTool) return { ok: false, status: "rejected", message: `Tool “${p.tool}” is not in the governed execution registry.`, conversationId: conversation.id, history: getConversation(sessionId) };
   const requiresApproval = governedTool.access === "WRITE" && governedTool.requiresApproval;
-  if (requiresApproval && !request.approved) {
+  if (requiresApproval) {
     const message = await persistMessage(c, conversation.id, { role: "ASSISTANT", content: p.explanation, intent: p.intent, tool: p.tool, requiresApproval: true, approved: false, metadata: { plan: { ...p, requiresApproval } } });
     const approval = await agentApprovalService.create(c, { conversationId: conversation.id, messageId: message.id, tool: p.tool, arguments: p.arguments }); setPendingApproval(sessionId, request.message); remember(sessionId, { role: "agent", content: p.explanation, intent: p.intent, tool: p.tool, approved: false });
     return { ok: true, status: "approval_required", plan: { ...p, requiresApproval }, approvalId: approval.id, message: `Approval required: ${p.explanation}`, conversationId: conversation.id, history: getConversation(sessionId) };
   }
-  if (requiresApproval && !canApprove(identity)) return { ok: false, status: "forbidden", message: "This write operation requires an authorized approver.", conversationId: conversation.id, history: getConversation(sessionId) };
-  if (requiresApproval) clearPendingApproval(sessionId); const result = await executePlan(identity, { ...p, requiresApproval });
-  await persistMessage(c, conversation.id, { role: "ASSISTANT", content: String(result.message ?? p.explanation), intent: p.intent, tool: p.tool, approved: Boolean(request.approved), metadata: { status: result.status, data: result.data ?? null } });
-  remember(sessionId, { role: "agent", content: String(result.message ?? p.explanation), intent: p.intent, tool: p.tool, approved: request.approved }); return { ...result, conversationId: conversation.id, history: getConversation(sessionId) };
+  const result = await executePlan(identity, { ...p, requiresApproval });
+  await persistMessage(c, conversation.id, { role: "ASSISTANT", content: String(result.message ?? p.explanation), intent: p.intent, tool: p.tool, approved: false, metadata: { status: result.status, data: result.data ?? null } });
+  remember(sessionId, { role: "agent", content: String(result.message ?? p.explanation), intent: p.intent, tool: p.tool, approved: false }); return { ...result, conversationId: conversation.id, history: getConversation(sessionId) };
 }
 
 export async function executeApproval(identityInput: AeonIdentity, approvalId: string) {
   const identity = assertIdentity(identityInput);
-  const c = context(identity); const approval = await agentApprovalService.get(c, approvalId); if (!approval) throw new Error("approval not found"); if (approval.status !== "APPROVED") throw new Error(`approval is ${approval.status.toLowerCase()}`);
-  const result = await executeTool(identity, approval.tool, approval.arguments as Record<string, unknown>); await agentApprovalService.markExecuted(c, approvalId);
-  await persistMessage(c, approval.conversationId, { role: "TOOL", content: String(result.message ?? `Executed ${approval.tool}.`), tool: approval.tool, approved: true, metadata: { approvalId, status: result.status, data: result.data ?? null } });
-  return { ...result, approvalId, conversationId: approval.conversationId };
+  const c = context(identity); const approval = await agentApprovalService.get(c, approvalId); if (!approval) throw new Error("approval not found");
+  const claimed = await agentApprovalService.claimExecution(c, approvalId);
+  if (!claimed) throw new Error("approval execution could not be claimed");
+  try {
+    const result = await executeTool(identity, approval.tool, approval.arguments as Record<string, unknown>);
+    if (!result.ok) { await agentApprovalService.releaseExecution(c, approvalId); return { ...result, approvalId, conversationId: approval.conversationId }; }
+    await agentApprovalService.markExecuted(c, approvalId);
+    await persistMessage(c, approval.conversationId, { role: "TOOL", content: String(result.message ?? `Executed ${approval.tool}.`), tool: approval.tool, approved: true, metadata: { approvalId, status: result.status, data: result.data ?? null } });
+    return { ...result, approvalId, conversationId: approval.conversationId };
+  } catch (error) {
+    await agentApprovalService.releaseExecution(c, approvalId);
+    throw error;
+  }
 }
 
 export { plan as createAgentPlan, getConversation };
