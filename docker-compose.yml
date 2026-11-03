@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: aeoncrm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aeoncrm
+      POSTGRES_PASSWORD: aeoncrm
+      POSTGRES_DB: aeoncrm
+    ports:
+      - "5432:5432"
+    volumes:
+      - aeoncrm-postgres:/var/lib/postgresql/data
+
+volumes:
+  aeoncrm-postgres:
