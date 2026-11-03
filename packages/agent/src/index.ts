@@ -56,7 +56,7 @@ async function persistMessage(c: TenantContext, conversationId: string, input: O
 
 async function executeTool(identity: AeonIdentity, toolName: string, args: Record<string, unknown>) {
   const c = context(identity);
-  const tool = toolRegistry.authorize(identity, toolName);
+  const tool = toolRegistry.authorize(identity, toolName, args);
   const data = await tool.execute(c, args);
   if (typeof data === "object" && data !== null && "needsClarification" in data && (data as { needsClarification?: boolean }).needsClarification) return { ok: false, status: "needs_clarification", ...(data as Record<string, unknown>) };
   if (typeof data === "object" && data !== null && "rejected" in data && (data as { rejected?: boolean }).rejected) return { ok: false, status: "rejected", ...(data as Record<string, unknown>) };
@@ -66,8 +66,12 @@ async function executeTool(identity: AeonIdentity, toolName: string, args: Recor
 async function executePlan(identity: AeonIdentity, p: AgentPlan) {
   const tool = toolRegistry.get(p.tool);
   if (!tool) return { ok: false, status: "rejected", plan: p, message: `Tool “${p.tool}” is not in the governed execution registry.` };
-  const result = await executeTool(identity, p.tool, p.arguments);
-  return { ...result, plan: p };
+  try {
+    const result = await executeTool(identity, p.tool, p.arguments);
+    return { ...result, plan: p };
+  } catch (error) {
+    return { ok: false, status: "rejected", plan: p, message: error instanceof Error ? error.message : "Tool authorization failed." };
+  }
 }
 
 export async function runAgent(request: AgentRequest) {
@@ -79,6 +83,7 @@ export async function runAgent(request: AgentRequest) {
   if (!governedTool) return { ok: false, status: "rejected", message: `Tool “${p.tool}” is not in the governed execution registry.`, conversationId: conversation.id, history: getConversation(sessionId) };
   const requiresApproval = governedTool.access === "WRITE" && governedTool.requiresApproval;
   if (requiresApproval) {
+    try { toolRegistry.authorize(identity, p.tool, p.arguments); } catch (error) { return { ok: false, status: "forbidden", message: error instanceof Error ? error.message : "Tool authorization failed.", conversationId: conversation.id, history: getConversation(sessionId) }; }
     const message = await persistMessage(c, conversation.id, { role: "ASSISTANT", content: p.explanation, intent: p.intent, tool: p.tool, requiresApproval: true, approved: false, metadata: { plan: { ...p, requiresApproval } } });
     const approval = await agentApprovalService.create(c, { conversationId: conversation.id, messageId: message.id, tool: p.tool, arguments: p.arguments }); setPendingApproval(sessionId, request.message); remember(sessionId, { role: "agent", content: p.explanation, intent: p.intent, tool: p.tool, approved: false });
     return { ok: true, status: "approval_required", plan: { ...p, requiresApproval }, approvalId: approval.id, message: `Approval required: ${p.explanation}`, conversationId: conversation.id, history: getConversation(sessionId) };
