@@ -1,4 +1,6 @@
 import { db } from "@aeoncrm/db";
+import type { AeonIdentity } from "./identity";
+import { canApprove } from "./identity";
 
 export type TenantContext = { tenantId: string; userId?: string };
 
@@ -47,9 +49,19 @@ export const agentMessageService = {
   },
 };
 
+async function assertApprovalLinks(tenantId: string, conversationId: string, messageId: string) {
+  const [conversation, message] = await Promise.all([
+    db.agentConversation.findFirst({ where: { id: conversationId, tenantId }, select: { id: true } }),
+    db.agentMessage.findFirst({ where: { id: messageId, conversation: { tenantId } }, select: { id: true, conversationId: true } }),
+  ]);
+  if (!conversation) throw new Error("approval conversation not found");
+  if (!message || message.conversationId !== conversationId) throw new Error("approval message not found");
+}
+
 export const agentApprovalService = {
   create: async (context: TenantContext, input: { conversationId: string; messageId: string; tool: string; arguments: Record<string, unknown> }) => {
     const { tenantId } = requireTenant(context);
+    await assertApprovalLinks(tenantId, input.conversationId, input.messageId);
     return db.agentApproval.create({ data: { tenantId, ...input, arguments: input.arguments } });
   },
   get: async (context: TenantContext, id: string) => {
@@ -60,7 +72,34 @@ export const agentApprovalService = {
     const { tenantId } = requireTenant(context);
     return db.agentApproval.findMany({ where: { tenantId, status: "PENDING", ...(conversationId ? { conversationId } : {}) }, orderBy: { createdAt: "asc" } });
   },
-  markApproved: async (context: TenantContext, id: string) => { const { tenantId } = requireTenant(context); return db.agentApproval.updateMany({ where: { id, tenantId, status: "PENDING" }, data: { status: "APPROVED" } }); },
-  markRejected: async (context: TenantContext, id: string) => { const { tenantId } = requireTenant(context); return db.agentApproval.updateMany({ where: { id, tenantId, status: "PENDING" }, data: { status: "REJECTED" } }); },
-  markExecuted: async (context: TenantContext, id: string) => { const { tenantId } = requireTenant(context); return db.agentApproval.updateMany({ where: { id, tenantId, status: "APPROVED" }, data: { status: "EXECUTED" } }); },
+  markApproved: async (identity: AeonIdentity, id: string) => {
+    const { tenantId } = requireTenant(identity);
+    if (!canApprove(identity)) throw new Error("approval authority required");
+    const result = await db.agentApproval.updateMany({ where: { id, tenantId, status: "PENDING" }, data: { status: "APPROVED" } });
+    if (result.count !== 1) throw new Error("approval is no longer pending");
+    return db.agentApproval.findFirst({ where: { id, tenantId } });
+  },
+  markRejected: async (identity: AeonIdentity, id: string) => {
+    const { tenantId } = requireTenant(identity);
+    if (!canApprove(identity)) throw new Error("approval authority required");
+    const result = await db.agentApproval.updateMany({ where: { id, tenantId, status: "PENDING" }, data: { status: "REJECTED" } });
+    if (result.count !== 1) throw new Error("approval is no longer pending");
+    return db.agentApproval.findFirst({ where: { id, tenantId } });
+  },
+  claimExecution: async (context: TenantContext, id: string) => {
+    const { tenantId } = requireTenant(context);
+    const result = await db.agentApproval.updateMany({ where: { id, tenantId, status: "APPROVED" }, data: { status: "EXECUTING" } });
+    if (result.count !== 1) throw new Error("approval is not available for execution");
+    return db.agentApproval.findFirst({ where: { id, tenantId } });
+  },
+  markExecuted: async (context: TenantContext, id: string) => {
+    const { tenantId } = requireTenant(context);
+    const result = await db.agentApproval.updateMany({ where: { id, tenantId, status: "EXECUTING" }, data: { status: "EXECUTED" } });
+    if (result.count !== 1) throw new Error("approval execution claim is invalid");
+    return db.agentApproval.findFirst({ where: { id, tenantId } });
+  },
+  releaseExecution: async (context: TenantContext, id: string) => {
+    const { tenantId } = requireTenant(context);
+    return db.agentApproval.updateMany({ where: { id, tenantId, status: "EXECUTING" }, data: { status: "APPROVED" } });
+  },
 };
