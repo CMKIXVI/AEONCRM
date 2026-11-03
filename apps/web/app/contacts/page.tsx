@@ -1,0 +1,15 @@
+"use client";
+
+import { FormEvent, useEffect, useState } from "react";
+
+type Contact = { id: string; firstName: string; lastName: string; email?: string | null; phone?: string | null; title?: string | null; company?: { name: string } | null };
+type Company = { id: string; name: string };
+
+export default function ContactsPage() {
+  const [contacts, setContacts] = useState<Contact[]>([]); const [companies, setCompanies] = useState<Company[]>([]);
+  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", title: "", companyId: "" }); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const load = () => Promise.all([fetch("/api/contacts").then(r => r.json()), fetch("/api/companies").then(r => r.json())]).then(([c, co]) => { setContacts(c.data ?? []); setCompanies(co.data ?? []); }).catch(() => setError("Unable to load contacts.")).finally(() => setLoading(false));
+  useEffect(load, []);
+  async function createContact(e: FormEvent) { e.preventDefault(); setSaving(true); setError(""); const res = await fetch("/api/contacts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, companyId: form.companyId || undefined }) }); const body = await res.json(); if (!res.ok) setError(body.error ?? "Could not create contact."); else { setForm({ firstName: "", lastName: "", email: "", phone: "", title: "", companyId: "" }); await load(); } setSaving(false); }
+  return <main className="recordPage"><header className="recordHeader"><div><a href="/">← Dashboard</a><h1>Contacts</h1><p>People and decision makers connected to your accounts.</p></div><strong>{contacts.length}</strong></header><section className="recordForm"><h2>Add contact</h2><form onSubmit={createContact}><input required placeholder="First name" value={form.firstName} onChange={e => setForm({...form, firstName:e.target.value})}/><input required placeholder="Last name" value={form.lastName} onChange={e => setForm({...form, lastName:e.target.value})}/><input placeholder="Email" value={form.email} onChange={e => setForm({...form, email:e.target.value})}/><input placeholder="Phone" value={form.phone} onChange={e => setForm({...form, phone:e.target.value})}/><input placeholder="Title" value={form.title} onChange={e => setForm({...form, title:e.target.value})}/><select value={form.companyId} onChange={e => setForm({...form, companyId:e.target.value})}><option value="">No company</option>{companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><button disabled={saving}>{saving ? "Creating…" : "Create contact"}</button></form>{error && <p className="error">{error}</p>}</section><section className="recordList">{loading ? <p>Loading…</p> : contacts.length === 0 ? <p className="empty">No contacts yet.</p> : contacts.map(c => <article className="recordRow" key={c.id}><div><h3>{c.firstName} {c.lastName}</h3><p>{c.title || "Contact"}{c.company ? ` · ${c.company.name}` : ""}</p></div><span>{c.email || c.phone || "No contact details"}</span></article>)}</section></main>;
+}
