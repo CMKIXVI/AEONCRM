@@ -7,7 +7,7 @@ if (!connectionString) throw new Error("DATABASE_URL is required");
 
 const globalForDb = globalThis as unknown as {
   sql?: ReturnType<typeof postgres>;
-  db?: ReturnType<typeof drizzle<typeof schema>>;
+  db?: ReturnType<typeof drizzle>;
 };
 
 const sql = globalForDb.sql ?? postgres(connectionString, {
