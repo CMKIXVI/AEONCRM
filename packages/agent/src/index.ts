@@ -90,12 +90,8 @@ export async function runAgent(request: AgentRequest) {
   if (p.requiresApproval) clearPendingApproval(sessionId);
   const result = await executePlan(p);
   await persistMessage(conversation.id, {
-    role: "ASSISTANT",
-    content: String(result.message ?? p.explanation),
-    intent: p.intent,
-    tool: p.tool,
-    approved: Boolean(request.approved),
-    metadata: { status: result.status, data: result.data ?? null },
+    role: "ASSISTANT", content: String(result.message ?? p.explanation), intent: p.intent, tool: p.tool,
+    approved: Boolean(request.approved), metadata: { status: result.status, data: result.data ?? null },
   });
   remember(sessionId, { role: "agent", content: String(result.message ?? p.explanation), intent: p.intent, tool: p.tool, approved: request.approved });
   return { ...result, conversationId: conversation.id, history: getConversation(sessionId) };
@@ -105,17 +101,30 @@ export async function executeApproval(approvalId: string) {
   const approval = await agentApprovalService.get(approvalId);
   if (!approval) throw new Error("approval not found");
   if (approval.status !== "APPROVED") throw new Error(`approval is ${approval.status.toLowerCase()}`);
-  const p = { intent: "UNKNOWN" as AgentIntent, tool: approval.tool, arguments: approval.arguments as Record<string, unknown>, requiresApproval: true, explanation: `Execute approved action ${approval.tool}.` };
-  const result = await executePlan(p);
+  const result = await executeTool(approval.tool, approval.arguments as Record<string, unknown>);
   await agentApprovalService.markExecuted(approvalId);
   await persistMessage(approval.conversationId, {
-    role: "TOOL",
-    content: String(result.message ?? `Executed ${approval.tool}.`),
-    tool: approval.tool,
-    approved: true,
-    metadata: { approvalId, status: result.status, data: result.data ?? null },
+    role: "TOOL", content: String(result.message ?? `Executed ${approval.tool}.`), tool: approval.tool,
+    approved: true, metadata: { approvalId, status: result.status, data: result.data ?? null },
   });
   return { ...result, approvalId, conversationId: approval.conversationId };
+}
+
+async function executeTool(tool: string, args: Record<string, unknown>) {
+  switch (tool) {
+    case "companies.create": return { ok: true, status: "completed", data: await companyService.create({ name: String(args.name) }) };
+    case "tasks.create": return { ok: true, status: "completed", data: await taskService.create({ title: String(args.title) }) };
+    case "deals.updateStage": {
+      const stage = String(args.stage) as DealStage;
+      if (!stages.includes(stage)) return { ok: false, status: "rejected", message: "Invalid deal stage." };
+      const deals = await dealService.list();
+      const query = String(args.dealQuery).toLowerCase();
+      const matches = deals.filter((d) => d.name.toLowerCase().includes(query));
+      if (matches.length !== 1) return { ok: false, status: "needs_clarification", matches: matches.slice(0, 10), message: matches.length ? "More than one deal matches." : "No matching deal found." };
+      return { ok: true, status: "completed", data: await dealService.updateStage(matches[0].id, stage) };
+    }
+    default: return { ok: false, status: "rejected", message: `Tool “${tool}” is not in the governed execution registry.` };
+  }
 }
 
 async function executePlan(p: AgentPlan) {
@@ -130,15 +139,7 @@ async function executePlan(p: AgentPlan) {
     }
     case "CREATE_COMPANY": return { ok: true, status: "completed", plan: p, data: await companyService.create({ name: String(p.arguments.name) }) };
     case "CREATE_TASK": return { ok: true, status: "completed", plan: p, data: await taskService.create({ title: String(p.arguments.title) }) };
-    case "MOVE_DEAL": {
-      const stage = String(p.arguments.stage) as DealStage;
-      if (!stages.includes(stage)) return { ok: false, status: "rejected", plan: p, message: "Invalid deal stage." };
-      const deals = await dealService.list();
-      const query = String(p.arguments.dealQuery).toLowerCase();
-      const matches = deals.filter((d) => d.name.toLowerCase().includes(query));
-      if (matches.length !== 1) return { ok: false, status: "needs_clarification", plan: p, matches: matches.slice(0, 10), message: matches.length ? "More than one deal matches." : "No matching deal found." };
-      return { ok: true, status: "completed", plan: p, data: await dealService.updateStage(matches[0].id, stage) };
-    }
+    case "MOVE_DEAL": return { ...await executeTool(p.tool, p.arguments), plan: p };
     default: return { ok: false, status: "not_implemented", plan: p, message: "This capability is planned but not yet enabled." };
   }
 }
