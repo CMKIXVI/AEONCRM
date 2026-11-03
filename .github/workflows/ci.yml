@@ -35,6 +35,14 @@ jobs:
           node-version: 20
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm --filter @aeoncrm/db generate
+      - name: Verify generated migrations are committed
+        run: git diff --exit-code -- packages/db/drizzle
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aeoncrm-drizzle-generated
+          path: packages/db/drizzle
+          if-no-files-found: error
       - run: pnpm --filter @aeoncrm/db build
       - run: pnpm --filter @aeoncrm/db migrate
       - run: pnpm --filter @aeoncrm/core typecheck
