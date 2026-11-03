@@ -1,2 +1,2 @@
-export { db } from "./client";
-export * from "@prisma/client";
+export { db, sql } from "./client";
+export * from "./schema";
