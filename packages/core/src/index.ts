@@ -18,11 +18,36 @@ export const contactService = {
   create: async (c: TenantContext, input: { firstName: string; lastName: string; email?: string; phone?: string; title?: string; companyId?: string }) => { await tenantCrm.company(c, input.companyId); return db.contact.create({ data: { ...input, tenantId: tenantCrm.tenant(c) } }); },
 };
 
+export const leadService = {
+  list: (c: TenantContext) => db.lead.findMany({ where: { tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true }, orderBy: [{ score: "desc" }, { updatedAt: "desc" }] }),
+  get: (c: TenantContext, id: string) => db.lead.findFirst({ where: { id, tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true } }),
+  create: async (c: TenantContext, input: { firstName?: string; lastName?: string; companyName?: string; email?: string; phone?: string; title?: string; source?: string; score?: number; notes?: string; companyId?: string; contactId?: string }) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); return db.lead.create({ data: { ...input, tenantId: tenantCrm.tenant(c) } }); },
+  updateStatus: async (c: TenantContext, id: string, status: "NEW" | "CONTACTED" | "QUALIFIED" | "CONVERTED" | "LOST") => db.lead.updateMany({ where: { id, tenantId: tenantCrm.tenant(c) }, data: { status } }),
+};
+
 export const dealService = {
-  list: (c: TenantContext) => db.deal.findMany({ where: { tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true }, orderBy: { updatedAt: "desc" } }),
-  get: (c: TenantContext, id: string) => db.deal.findFirst({ where: { id, tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true, activities: true, tasks: true } }),
+  list: (c: TenantContext) => db.deal.findMany({ where: { tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true, lineItems: { include: { product: true } } }, orderBy: { updatedAt: "desc" } }),
+  get: (c: TenantContext, id: string) => db.deal.findFirst({ where: { id, tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true, activities: true, tasks: true, lineItems: { include: { product: true } } } }),
   create: async (c: TenantContext, input: { name: string; value?: number; currency?: string; stage?: DealStage; probability?: number; companyId?: string; contactId?: string }) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); return db.deal.create({ data: { ...input, tenantId: tenantCrm.tenant(c), value: input.value ?? 0 } }); },
   updateStage: async (c: TenantContext, id: string, stage: DealStage) => db.deal.updateMany({ where: { id, tenantId: tenantCrm.tenant(c) }, data: { stage } }),
+};
+
+export const ticketService = {
+  list: (c: TenantContext) => db.ticket.findMany({ where: { tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true }, orderBy: [{ priority: "desc" }, { updatedAt: "desc" }] }),
+  get: (c: TenantContext, id: string) => db.ticket.findFirst({ where: { id, tenantId: tenantCrm.tenant(c) }, include: { company: true, contact: true } }),
+  create: async (c: TenantContext, input: { subject: string; description?: string; priority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT"; companyId?: string; contactId?: string }) => { await tenantCrm.company(c, input.companyId); await tenantCrm.contact(c, input.contactId); return db.ticket.create({ data: { ...input, tenantId: tenantCrm.tenant(c) } }); },
+  updateStatus: async (c: TenantContext, id: string, status: "OPEN" | "PENDING" | "RESOLVED" | "CLOSED") => db.ticket.updateMany({ where: { id, tenantId: tenantCrm.tenant(c) }, data: { status, resolvedAt: status === "RESOLVED" || status === "CLOSED" ? new Date() : null } }),
+};
+
+export const productService = {
+  list: (c: TenantContext) => db.product.findMany({ where: { tenantId: tenantCrm.tenant(c) }, orderBy: [{ active: "desc" }, { name: "asc" }] }),
+  get: (c: TenantContext, id: string) => db.product.findFirst({ where: { id, tenantId: tenantCrm.tenant(c) }, include: { lineItems: true } }),
+  create: (c: TenantContext, input: { name: string; sku?: string; description?: string; unitPrice: number; currency?: string; active?: boolean }) => db.product.create({ data: { ...input, tenantId: tenantCrm.tenant(c) } }),
+};
+
+export const lineItemService = {
+  listForDeal: async (c: TenantContext, dealId: string) => { await tenantCrm.deal(c, dealId); return db.lineItem.findMany({ where: { tenantId: tenantCrm.tenant(c), dealId }, include: { product: true }, orderBy: { createdAt: "asc" } }); },
+  create: async (c: TenantContext, input: { dealId: string; productId?: string; description?: string; quantity: number; unitPrice: number; discount?: number }) => { await tenantCrm.deal(c, input.dealId); await tenantCrm.product(c, input.productId); return db.lineItem.create({ data: { ...input, tenantId: tenantCrm.tenant(c) } }); },
 };
 
 export const activityService = {
@@ -39,14 +64,12 @@ export const taskService = {
 export const dashboardService = {
   async summary(c: TenantContext) {
     const tenantId = tenantCrm.tenant(c);
-    const [companies, contacts, openDeals, wonDeals, openTasks, followUps] = await Promise.all([
-      db.company.count({ where: { tenantId } }), db.contact.count({ where: { tenantId } }),
-      db.deal.aggregate({ where: { tenantId, status: "OPEN" }, _sum: { value: true }, _count: true }),
-      db.deal.aggregate({ where: { tenantId, status: "WON" }, _sum: { value: true }, _count: true }),
-      db.task.count({ where: { tenantId, status: { in: ["TODO", "IN_PROGRESS"] } } }),
-      db.task.count({ where: { tenantId, status: { in: ["TODO", "IN_PROGRESS"], }, dueAt: { not: null } } }),
+    const [companies, contacts, leads, tickets, openDeals, wonDeals, openTasks, followUps] = await Promise.all([
+      db.company.count({ where: { tenantId } }), db.contact.count({ where: { tenantId } }), db.lead.count({ where: { tenantId, status: { in: ["NEW", "CONTACTED", "QUALIFIED"] } } }), db.ticket.count({ where: { tenantId, status: { in: ["OPEN", "PENDING"] } } }),
+      db.deal.aggregate({ where: { tenantId, status: "OPEN" }, _sum: { value: true }, _count: true }), db.deal.aggregate({ where: { tenantId, status: "WON" }, _sum: { value: true }, _count: true }),
+      db.task.count({ where: { tenantId, status: { in: ["TODO", "IN_PROGRESS"] } } }), db.task.count({ where: { tenantId, status: { in: ["TODO", "IN_PROGRESS"], }, dueAt: { not: null } } }),
     ]);
-    return { companies, contacts, openDeals: openDeals._count, openPipelineValue: Number(openDeals._sum.value ?? 0), wonDeals: wonDeals._count, wonRevenue: Number(wonDeals._sum.value ?? 0), openTasks, followUps };
+    return { companies, contacts, leads, tickets, openDeals: openDeals._count, openPipelineValue: Number(openDeals._sum.value ?? 0), wonDeals: wonDeals._count, wonRevenue: Number(wonDeals._sum.value ?? 0), openTasks, followUps };
   },
 };
 
