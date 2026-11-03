@@ -11,14 +11,14 @@ enum DealStatus { OPEN WON LOST }
 enum ActivityType { CALL EMAIL MEETING NOTE TASK }
 enum TaskStatus { TODO IN_PROGRESS DONE CANCELLED }
 
-a model Company {
-  id          String    @id @default(cuid())
+model Company {
+  id          String     @id @default(cuid())
   name        String
   website     String?
   industry    String?
   description String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
   contacts    Contact[]
   deals       Deal[]
   activities  Activity[]
@@ -27,16 +27,16 @@ a model Company {
 }
 
 model Contact {
-  id          String    @id @default(cuid())
+  id          String     @id @default(cuid())
   firstName   String
   lastName    String
   email       String?
   phone       String?
   title       String?
   companyId   String?
-  company     Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  company     Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
   deals       Deal[]
   activities  Activity[]
   tasks       Task[]
