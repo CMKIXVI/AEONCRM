@@ -67,7 +67,7 @@ export const dashboardService = {
     const [companies, contacts, leads, tickets, openDeals, wonDeals, openTasks, followUps] = await Promise.all([
       db.company.count({ where: { tenantId } }), db.contact.count({ where: { tenantId } }), db.lead.count({ where: { tenantId, status: { in: ["NEW", "CONTACTED", "QUALIFIED"] } } }), db.ticket.count({ where: { tenantId, status: { in: ["OPEN", "PENDING"] } } }),
       db.deal.aggregate({ where: { tenantId, status: "OPEN" }, _sum: { value: true }, _count: true }), db.deal.aggregate({ where: { tenantId, status: "WON" }, _sum: { value: true }, _count: true }),
-      db.task.count({ where: { tenantId, status: { in: ["TODO", "IN_PROGRESS"] } } }), db.task.count({ where: { tenantId, status: { in: ["TODO", "IN_PROGRESS"], }, dueAt: { not: null } } }),
+      db.task.count({ where: { tenantId, status: { in: ["TODO", "IN_PROGRESS"] } } }), db.task.count({ where: { tenantId, status: { in: ["TODO", "IN_PROGRESS"] }, dueAt: { not: null } } }),
     ]);
     return { companies, contacts, leads, tickets, openDeals: openDeals._count, openPipelineValue: Number(openDeals._sum.value ?? 0), wonDeals: wonDeals._count, wonRevenue: Number(wonDeals._sum.value ?? 0), openTasks, followUps };
   },
@@ -77,3 +77,5 @@ export { assertIdentity, canApprove } from "./identity";
 export type { AeonIdentity } from "./identity";
 export { agentConversationService, agentMessageService, agentApprovalService } from "./agent-memory";
 export type { TenantContext } from "./agent-memory";
+export { ToolRegistry, createDefaultToolRegistry } from "./tool-registry";
+export type { GovernedTool, ToolAccess, ToolRisk } from "./tool-registry";
