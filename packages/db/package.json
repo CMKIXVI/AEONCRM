@@ -12,17 +12,18 @@
     }
   },
   "scripts": {
-    "generate": "prisma generate --schema prisma/schema.prisma",
+    "generate": "drizzle-kit generate",
     "build": "tsc",
-    "migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "migrate": "drizzle-kit migrate",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@prisma/client": "^6.0.0"
+    "drizzle-orm": "^0.36.4",
+    "postgres": "^3.4.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "prisma": "^6.0.0",
+    "drizzle-kit": "^0.27.2",
     "typescript": "^5.7.0"
   }
 }
