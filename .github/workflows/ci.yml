@@ -18,6 +18,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm --filter @aeoncrm/db generate
       - run: pnpm --filter @aeoncrm/core typecheck
       - run: pnpm --filter @aeoncrm/core test
