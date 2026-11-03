@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id          String    @id @default(cuid())
+  name        String
+  website     String?
+  industry    String?
+  description String?
+  contacts    Contact[]
+  deals       Deal[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([name])
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  firstName String
+  lastName  String
+  email     String?
+  phone     String?
+  title     String?
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  deals     Deal[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([companyId])
+}
+
+model Deal {
+  id          String      @id @default(cuid())
+  title       String
+  value       Decimal?    @db.Decimal(18, 2)
+  currency    String      @default("USD")
+  stage       DealStage   @default(LEAD)
+  probability Int         @default(10)
+  companyId   String?
+  contactId   String?
+  company     Company?    @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact     Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  activities  Activity[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([stage])
+  @@index([companyId])
+}
+
+model Activity {
+  id        String       @id @default(cuid())
+  type      ActivityType
+  subject   String
+  notes     String?
+  dueAt     DateTime?
+  completed Boolean      @default(false)
+  dealId    String?
+  deal      Deal?        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([dueAt])
+  @@index([dealId])
+}
+
+enum DealStage {
+  LEAD
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  MEETING
+  TASK
+  NOTE
+}
