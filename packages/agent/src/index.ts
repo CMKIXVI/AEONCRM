@@ -1,6 +1,6 @@
 import {
-  agentApprovalService, agentConversationService, agentMessageService, companyService, contactService,
-  dashboardService, dealService, taskService, type AeonIdentity, type DealStage, type TenantContext,
+  agentApprovalService, agentConversationService, agentMessageService, assertIdentity, canApprove, companyService, contactService,
+  createDefaultToolRegistry, dashboardService, dealService, taskService, type AeonIdentity, type DealStage, type TenantContext,
 } from "@aeoncrm/core";
 import { clearPendingApproval, getConversation, remember, setPendingApproval } from "./memory";
 
@@ -9,6 +9,34 @@ export type AgentRequest = { message: string; approved?: boolean; sessionId?: st
 export type AgentPlan = { intent: AgentIntent; tool: string; arguments: Record<string, unknown>; requiresApproval: boolean; explanation: string };
 const stages: DealStage[] = ["LEAD", "QUALIFIED", "PROPOSAL", "NEGOTIATION", "WON", "LOST"];
 const context = (identity: AeonIdentity): TenantContext => ({ tenantId: identity.tenantId, userId: identity.userId });
+
+const toolRegistry = createDefaultToolRegistry({
+  "dashboard.summary": async (c) => dashboardService.summary(c),
+  "companies.list": async (c) => companyService.list(c),
+  "contacts.list": async (c) => contactService.list(c),
+  "deals.list": async (c) => dealService.list(c),
+  "deals.findAttention": async (c) => {
+    const deals = await dealService.list(c);
+    return deals.filter((d) => d.status === "OPEN" && (d.probability < 50 || d.stage === "PROPOSAL" || d.stage === "NEGOTIATION")).slice(0, 10);
+  },
+  "companies.create": async (c, args) => companyService.create(c, { name: String(args.name) }),
+  "tasks.create": async (c, args) => taskService.create(c, { title: String(args.title) }),
+  "deals.updateStage": async (c, args) => {
+    const stage = String(args.stage) as DealStage;
+    if (!stages.includes(stage)) return { rejected: true, message: "Invalid deal stage." };
+    const deals = await dealService.list(c);
+    const query = String(args.dealQuery).trim().toLowerCase();
+    const matches = deals.filter((d) => d.name.toLowerCase().includes(query));
+    if (matches.length !== 1) {
+      return {
+        needsClarification: true,
+        matches: matches.slice(0, 10),
+        message: matches.length ? "More than one deal matches." : "No matching deal found.",
+      };
+    }
+    return dealService.updateStage(c, matches[0].id, stage);
+  },
+});
 
 function plan(message: string): AgentPlan {
   const text = message.trim(); const lower = text.toLowerCase();
@@ -32,48 +60,54 @@ async function ensureConversation(c: TenantContext, conversationId?: string) {
 }
 async function persistMessage(c: TenantContext, conversationId: string, input: Omit<Parameters<typeof agentMessageService.append>[1], "conversationId">) { return agentMessageService.append(c, { ...input, conversationId }); }
 
+async function executeTool(identity: AeonIdentity, toolName: string, args: Record<string, unknown>) {
+  const c = context(identity);
+  const tool = toolRegistry.authorize(identity, toolName);
+  if (tool.access === "WRITE" && tool.requiresApproval && !canApprove(identity)) {
+    throw new Error(`approval authority required for write tool: ${toolName}`);
+  }
+  const data = await tool.execute(c, args);
+  if (typeof data === "object" && data !== null && "needsClarification" in data && (data as { needsClarification?: boolean }).needsClarification) {
+    return { ok: false, status: "needs_clarification", ...(data as Record<string, unknown>) };
+  }
+  if (typeof data === "object" && data !== null && "rejected" in data && (data as { rejected?: boolean }).rejected) {
+    return { ok: false, status: "rejected", ...(data as Record<string, unknown>) };
+  }
+  return { ok: true, status: "completed", data };
+}
+
+async function executePlan(identity: AeonIdentity, p: AgentPlan) {
+  const tool = toolRegistry.get(p.tool);
+  if (!tool) return { ok: false, status: "rejected", plan: p, message: `Tool “${p.tool}” is not in the governed execution registry.` };
+  const result = await executeTool(identity, p.tool, p.arguments);
+  return { ...result, plan: p };
+}
+
 export async function runAgent(request: AgentRequest) {
-  const c = context(request.identity); const sessionId = request.sessionId ?? request.conversationId ?? "default"; const conversation = await ensureConversation(c, request.conversationId); const p = plan(request.message);
+  const identity = assertIdentity(request.identity);
+  const c = context(identity); const sessionId = request.sessionId ?? request.conversationId ?? "default"; const conversation = await ensureConversation(c, request.conversationId); const p = plan(request.message);
   await persistMessage(c, conversation.id, { role: "USER", content: request.message, intent: p.intent, tool: p.tool }); remember(sessionId, { role: "user", content: request.message });
   if (p.intent === "UNKNOWN") { await persistMessage(c, conversation.id, { role: "ASSISTANT", content: p.explanation, intent: p.intent, tool: p.tool }); return { ok: false, ...p, message: p.explanation, conversationId: conversation.id, history: getConversation(sessionId) }; }
-  if (p.requiresApproval && !request.approved) {
-    const message = await persistMessage(c, conversation.id, { role: "ASSISTANT", content: p.explanation, intent: p.intent, tool: p.tool, requiresApproval: true, approved: false, metadata: { plan: p } });
+  const governedTool = toolRegistry.get(p.tool);
+  if (!governedTool) return { ok: false, status: "rejected", message: `Tool “${p.tool}” is not in the governed execution registry.`, conversationId: conversation.id, history: getConversation(sessionId) };
+  const requiresApproval = governedTool.access === "WRITE" && governedTool.requiresApproval;
+  if (requiresApproval && !request.approved) {
+    const message = await persistMessage(c, conversation.id, { role: "ASSISTANT", content: p.explanation, intent: p.intent, tool: p.tool, requiresApproval: true, approved: false, metadata: { plan: { ...p, requiresApproval } } });
     const approval = await agentApprovalService.create(c, { conversationId: conversation.id, messageId: message.id, tool: p.tool, arguments: p.arguments }); setPendingApproval(sessionId, request.message); remember(sessionId, { role: "agent", content: p.explanation, intent: p.intent, tool: p.tool, approved: false });
-    return { ok: true, status: "approval_required", plan: p, approvalId: approval.id, message: `Approval required: ${p.explanation}`, conversationId: conversation.id, history: getConversation(sessionId) };
+    return { ok: true, status: "approval_required", plan: { ...p, requiresApproval }, approvalId: approval.id, message: `Approval required: ${p.explanation}`, conversationId: conversation.id, history: getConversation(sessionId) };
   }
-  if (p.requiresApproval) clearPendingApproval(sessionId); const result = await executePlan(c, p);
+  if (requiresApproval && !canApprove(identity)) return { ok: false, status: "forbidden", message: "This write operation requires an authorized approver.", conversationId: conversation.id, history: getConversation(sessionId) };
+  if (requiresApproval) clearPendingApproval(sessionId); const result = await executePlan(identity, { ...p, requiresApproval });
   await persistMessage(c, conversation.id, { role: "ASSISTANT", content: String(result.message ?? p.explanation), intent: p.intent, tool: p.tool, approved: Boolean(request.approved), metadata: { status: result.status, data: result.data ?? null } });
   remember(sessionId, { role: "agent", content: String(result.message ?? p.explanation), intent: p.intent, tool: p.tool, approved: request.approved }); return { ...result, conversationId: conversation.id, history: getConversation(sessionId) };
 }
 
-export async function executeApproval(identity: AeonIdentity, approvalId: string) {
+export async function executeApproval(identityInput: AeonIdentity, approvalId: string) {
+  const identity = assertIdentity(identityInput);
   const c = context(identity); const approval = await agentApprovalService.get(c, approvalId); if (!approval) throw new Error("approval not found"); if (approval.status !== "APPROVED") throw new Error(`approval is ${approval.status.toLowerCase()}`);
-  const result = await executeTool(c, approval.tool, approval.arguments as Record<string, unknown>); await agentApprovalService.markExecuted(c, approvalId);
+  const result = await executeTool(identity, approval.tool, approval.arguments as Record<string, unknown>); await agentApprovalService.markExecuted(c, approvalId);
   await persistMessage(c, approval.conversationId, { role: "TOOL", content: String(result.message ?? `Executed ${approval.tool}.`), tool: approval.tool, approved: true, metadata: { approvalId, status: result.status, data: result.data ?? null } });
   return { ...result, approvalId, conversationId: approval.conversationId };
-}
-
-async function executeTool(c: TenantContext, tool: string, args: Record<string, unknown>) {
-  switch (tool) {
-    case "companies.create": return { ok: true, status: "completed", data: await companyService.create(c, { name: String(args.name) }) };
-    case "tasks.create": return { ok: true, status: "completed", data: await taskService.create(c, { title: String(args.title) }) };
-    case "deals.updateStage": { const stage = String(args.stage) as DealStage; if (!stages.includes(stage)) return { ok: false, status: "rejected", message: "Invalid deal stage." }; const deals = await dealService.list(c); const query = String(args.dealQuery).toLowerCase(); const matches = deals.filter((d) => d.name.toLowerCase().includes(query)); if (matches.length !== 1) return { ok: false, status: "needs_clarification", matches: matches.slice(0, 10), message: matches.length ? "More than one deal matches." : "No matching deal found." }; return { ok: true, status: "completed", data: await dealService.updateStage(c, matches[0].id, stage) }; }
-    default: return { ok: false, status: "rejected", message: `Tool “${tool}” is not in the governed execution registry.` };
-  }
-}
-
-async function executePlan(c: TenantContext, p: AgentPlan) {
-  switch (p.intent) {
-    case "SHOW_SALES": return { ok: true, status: "completed", plan: p, data: await dashboardService.summary(c) };
-    case "LIST_COMPANIES": return { ok: true, status: "completed", plan: p, data: await companyService.list(c) };
-    case "LIST_CONTACTS": return { ok: true, status: "completed", plan: p, data: await contactService.list(c) };
-    case "LIST_DEALS": return { ok: true, status: "completed", plan: p, data: await dealService.list(c) };
-    case "ATTENTION_DEALS": { const deals = await dealService.list(c); return { ok: true, status: "completed", plan: p, data: deals.filter((d) => d.status === "OPEN" && (d.probability < 50 || d.stage === "PROPOSAL" || d.stage === "NEGOTIATION")).slice(0, 10) }; }
-    case "CREATE_COMPANY": return { ok: true, status: "completed", plan: p, data: await companyService.create(c, { name: String(p.arguments.name) }) };
-    case "CREATE_TASK": return { ok: true, status: "completed", plan: p, data: await taskService.create(c, { title: String(p.arguments.title) }) };
-    case "MOVE_DEAL": return { ...await executeTool(c, p.tool, p.arguments), plan: p };
-    default: return { ok: false, status: "not_implemented", plan: p, message: "This capability is planned but not yet enabled." };
-  }
 }
 
 export { plan as createAgentPlan, getConversation };
