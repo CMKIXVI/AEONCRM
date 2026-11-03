@@ -13,6 +13,7 @@ enum TaskStatus { TODO IN_PROGRESS DONE CANCELLED }
 enum AgentConversationStatus { ACTIVE ARCHIVED }
 enum AgentMessageRole { USER ASSISTANT TOOL SYSTEM }
 enum AgentApprovalStatus { PENDING APPROVED REJECTED EXECUTING EXECUTED }
+enum AgentAuditEvent { PLANNED APPROVAL_REQUESTED APPROVED REJECTED EXECUTION_STARTED EXECUTED FAILED }
 enum MembershipRole { OWNER ADMIN MEMBER }
 enum LeadStatus { NEW CONTACTED QUALIFIED CONVERTED LOST }
 enum TicketStatus { OPEN PENDING RESOLVED CLOSED }
@@ -36,6 +37,7 @@ model Tenant {
   tasks        Task[]
   conversations AgentConversation[]
   approvals    AgentApproval[]
+  auditEvents  AgentAuditEventRecord[]
 }
 
 model User {
@@ -46,6 +48,7 @@ model User {
   updatedAt    DateTime     @updatedAt
   memberships  Membership[]
   messages     AgentMessage[]
+  auditEvents  AgentAuditEventRecord[]
 }
 
 model Membership {
@@ -279,6 +282,7 @@ model AgentApproval {
   tenantId       String
   conversationId String
   messageId      String @unique
+  correlationId  String
   tool           String
   arguments      Json
   status         AgentApprovalStatus @default(PENDING)
@@ -289,4 +293,25 @@ model AgentApproval {
   message        AgentMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
   @@index([tenantId, status])
   @@index([conversationId, status])
+  @@index([tenantId, correlationId])
+}
+
+model AgentAuditEventRecord {
+  id            String @id @default(cuid())
+  tenantId      String
+  userId        String?
+  correlationId String
+  event         AgentAuditEvent
+  tool          String?
+  outcome       String?
+  metadata      Json?
+  previousHash  String?
+  eventHash     String
+  createdAt     DateTime @default(now())
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user          User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  @@unique([tenantId, eventHash])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, correlationId, createdAt])
+  @@index([tenantId, event])
 }
