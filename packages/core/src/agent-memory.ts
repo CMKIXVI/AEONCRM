@@ -1,5 +1,5 @@
 import { db } from "@aeoncrm/db";
-import type { InputJsonValue } from "@prisma/client";
+import type { InputJsonValue } from "@aeoncrm/db";
 import type { AeonIdentity } from "./identity";
 import { canApprove } from "./identity";
 import { agentAuditService } from "./agent-audit";
