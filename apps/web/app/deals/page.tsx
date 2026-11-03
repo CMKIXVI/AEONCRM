@@ -1,0 +1,15 @@
+"use client";
+
+import { FormEvent, useEffect, useState } from "react";
+
+type Deal = { id:string; title:string; value:number|string; currency:string; stage:string; probability:number; company?:{name:string}|null; contact?:{firstName:string;lastName:string}|null };
+type Company = {id:string;name:string};
+const stages = ["LEAD","QUALIFIED","PROPOSAL","NEGOTIATION","WON","LOST"];
+
+export default function DealsPage() {
+ const [deals,setDeals]=useState<Deal[]>([]); const [companies,setCompanies]=useState<Company[]>([]); const [form,setForm]=useState({title:"",value:"",stage:"LEAD",probability:"20",companyId:""}); const [loading,setLoading]=useState(true); const [saving,setSaving]=useState(false); const [error,setError]=useState("");
+ const load=()=>Promise.all([fetch("/api/deals").then(r=>r.json()),fetch("/api/companies").then(r=>r.json())]).then(([d,c])=>{setDeals(d.data??[]);setCompanies(c.data??[])}).catch(()=>setError("Unable to load deals.")).finally(()=>setLoading(false));
+ useEffect(load,[]);
+ async function createDeal(e:FormEvent){e.preventDefault();setSaving(true);setError("");const res=await fetch("/api/deals",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...form,value:Number(form.value),probability:Number(form.probability),companyId:form.companyId||undefined})});const body=await res.json();if(!res.ok)setError(body.error??"Could not create deal.");else{setForm({title:"",value:"",stage:"LEAD",probability:"20",companyId:""});await load()}setSaving(false)}
+ return <main className="recordPage"><header className="recordHeader"><div><a href="/">← Dashboard</a><h1>Deals</h1><p>Pipeline opportunities managed by AEONCRM.</p></div><strong>{deals.length}</strong></header><section className="recordForm"><h2>Add deal</h2><form onSubmit={createDeal}><input required placeholder="Deal title" value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/><input required type="number" min="0" placeholder="Value" value={form.value} onChange={e=>setForm({...form,value:e.target.value})}/><select value={form.stage} onChange={e=>setForm({...form,stage:e.target.value})}>{stages.map(s=><option key={s}>{s}</option>)}</select><input type="number" min="0" max="100" placeholder="Probability %" value={form.probability} onChange={e=>setForm({...form,probability:e.target.value})}/><select value={form.companyId} onChange={e=>setForm({...form,companyId:e.target.value})}><option value="">No company</option>{companies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><button disabled={saving}>{saving?"Creating…":"Create deal"}</button></form>{error&&<p className="error">{error}</p>}</section><section className="recordList">{loading?<p>Loading…</p>:deals.length===0?<p className="empty">No deals yet.</p>:deals.map(d=><article className="recordRow" key={d.id}><div><h3>{d.title}</h3><p>{d.stage} · {d.probability}% probability{d.company?` · ${d.company.name}`:""}</p></div><strong>{new Intl.NumberFormat("en-IN",{style:"currency",currency:d.currency||"INR",maximumFractionDigits:0}).format(Number(d.value))}</strong></article>)}</section></main>;
+}
