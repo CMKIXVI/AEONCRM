@@ -294,7 +294,7 @@ model Activity {
 }
 
 model Task {
-  id          String  @id
+  id          String  @id @default(cuid())
   tenantId   String
   title       String
   description String?
@@ -374,7 +374,7 @@ model AgentAuditEventRecord {
   metadata      Json?
   previousHash  String?
   eventHash     String
-  createdAt      DateTime @default(now())
+  createdAt     DateTime @default(now())
   tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user          User? @relation(fields: [userId], references: [id], onDelete: SetNull)
   @@unique([tenantId, eventHash])
