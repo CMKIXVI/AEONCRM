@@ -1,5 +1,6 @@
 import { db } from "@aeoncrm/db";
 
+export type DealStage = "LEAD" | "QUALIFIED" | "PROPOSAL" | "NEGOTIATION" | "WON" | "LOST";
 export type CreateActivityInput = { type: "CALL" | "EMAIL" | "MEETING" | "TASK" | "NOTE"; subject: string; notes?: string; dueAt?: Date; companyId?: string; contactId?: string; dealId?: string };
 export type CreateTaskInput = { title: string; notes?: string; dueAt?: Date; companyId?: string; contactId?: string; dealId?: string };
 
@@ -18,7 +19,8 @@ export const contactService = {
 export const dealService = {
   list: () => db.deal.findMany({ include: { company: true, contact: true }, orderBy: { updatedAt: "desc" } }),
   get: (id: string) => db.deal.findUnique({ where: { id }, include: { company: true, contact: true, activities: true, tasks: true } }),
-  create: (input: { title: string; value?: number; currency?: string; stage?: "LEAD" | "QUALIFIED" | "PROPOSAL" | "NEGOTIATION" | "WON" | "LOST"; probability?: number; companyId?: string; contactId?: string }) => db.deal.create({ data: { ...input, value: input.value } }),
+  create: (input: { title: string; value?: number; currency?: string; stage?: DealStage; probability?: number; companyId?: string; contactId?: string }) => db.deal.create({ data: { ...input, value: input.value } }),
+  updateStage: (id: string, stage: DealStage) => db.deal.update({ where: { id }, data: { stage } }),
 };
 
 export const activityService = {
