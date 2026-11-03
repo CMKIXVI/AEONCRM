@@ -6,7 +6,7 @@ export type AeonIdentity = {
   roles: string[];
 };
 
-const SYSTEM_ROLES = new Set(["SYSTEM", "OWNER", "ADMIN", "AGENT"]);
+const APPROVAL_ROLES = new Set(["OWNER", "ADMIN"]);
 
 export function assertIdentity(identity: AeonIdentity): AeonIdentity {
   if (!identity.userId?.trim()) throw new Error("identity.userId is required");
@@ -15,5 +15,5 @@ export function assertIdentity(identity: AeonIdentity): AeonIdentity {
 }
 
 export function canApprove(identity: AeonIdentity): boolean {
-  return identity.roles.some((role) => SYSTEM_ROLES.has(role.toUpperCase()));
+  return identity.roles.some((role) => APPROVAL_ROLES.has(role.trim().toUpperCase()));
 }
