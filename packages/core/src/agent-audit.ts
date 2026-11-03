@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, desc, eq } from "drizzle-orm";
-import { agentAuditEventRecord, db, sql } from "@aeoncrm/db";
+import { and, asc, desc, eq, sql as drizzleSql } from "drizzle-orm";
+import { agentAuditEventRecord, db } from "@aeoncrm/db";
 import type { AgentAuditEventRecord } from "@aeoncrm/db";
 import type { TenantContext } from "./agent-memory";
 
@@ -21,7 +21,7 @@ export const agentAuditService = {
     const tenantId = tenant(context); const correlationId = bounded(input.correlationId, "correlationId"); if (!correlationId) throw new Error("correlationId is required");
     const tool = bounded(input.tool, "tool"); const outcome = bounded(input.outcome, "outcome"); const metadata = safeMetadata(input.metadata);
     return db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(${hashLockKey(tenantId)})`);
+      await tx.execute(drizzleSql`SELECT pg_advisory_xact_lock(${hashLockKey(tenantId)})`);
       const previous = await tx.select({ eventHash: agentAuditEventRecord.eventHash }).from(agentAuditEventRecord).where(eq(agentAuditEventRecord.tenantId, tenantId)).orderBy(desc(agentAuditEventRecord.createdAt), desc(agentAuditEventRecord.id)).limit(1);
       const previousHash = previous[0]?.eventHash;
       const createdAt = new Date();
